@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "pwllt"
+version = "0.1.0"
+description = ""
+authors = ["Nathan Taylor <ntaylor@cs.utexas.edu>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+z3-solver = "^4.13.0.0"
+pyright = "^1.1.377"
+ipython = "^8.26.0"
+pytest = "^8.3.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pyright]
+typeCheckingMode = "basic"
