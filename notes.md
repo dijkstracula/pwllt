@@ -1,7 +1,7 @@
 # Hi
 
-I'm Nathan, I'm a PhD student at UT Austin, studying formal methods for
-concurrent and distributed systems.
+I'm Nathan, I'm a PhD student at UT Austin, studying verification of concurrent
+and distributed systems.  Spent a decade in industry as a systems hacker.
 
 Not a type theorist by trade, but this is still a paper I love!
 
@@ -9,7 +9,7 @@ Not a type theorist by trade, but this is still a paper I love!
 
 Taking a page from the new historicists tonight:
 
-* Context: We'll discuss the environs surrounding the problem space
+* Context: We'll discuss the environs surrounding the problem
 * Text: We'll discuss the paper (and learn a bit how to read a PL paper!)
 * Subtext: We'll discuss what the paper doesn't (and what might come next)
 
@@ -24,15 +24,17 @@ granted.  We can do lots of awesome things with type systems:
 
 * Type checking (`program -> Either[(), TypeError]`)
 * Type reconstruction (inference) (`program -> Either[Map[value, type], TypeError]`)
+    - The meater of the two problems: this invents type assignments!
+    - Spoiler: this is the problem the paper solves
 * `<mysterious redaction>` (I'll tell you at the end)
     - gotta keep people at home watching, for Youtube watchtime metrics!
 
 Most type systems considered useful also have really strong theoretical
 properties:
 
-* Soundness (invalid programs are always rejected)
-* Efficiency (many type-theoretic algorithms are in P, often even O(n))
-* Decidable (type theorists write proofs that they'll terminate on all possible program inputs!)
+* Soundness (invalid programs are always rejected; no spurious errors)
+* Efficiency (many algorithms are in P, often even ~O(n))
+* Decidable (type theorists write proofs that they'll terminate on all possible programs!)
 
 It's the branch of formal methods that practitioners most commonly interact
 with.  Big win for types!
@@ -54,11 +56,10 @@ programming language_ in his paper, as opposed to making a general claim about
 _all type systems_. But, in meme form, the quotation remains as something to
 aspire to.
 
-For our purposes: let's say that a program "goes wrong" if it does
-something like raises an exception (e.g. AttributeError, IndexError).
-Of course, in Python exceptions aren't exceptional, so this doesn't really
-apply to "real" software, but just for today let's use this rough-and-ready
-approximation.
+For our purposes: let's say that a program "goes wrong" if it does something
+like raises an exception (e.g. AttributeError, IndexError). Of course, in
+Python exceptions aren't exceptional, so this doesn't really apply to "real"
+software, but just for today let's use this rough-and-ready approximation.
 
 # Lists
 
@@ -131,8 +132,11 @@ module system is sort of a dependent type system, and if you've heard of
 things like generalised algebraic data types or frameworks like Scalaz or
 Shapeless, you've encountered simplifed versions of the concept.
 
-The classic dependent type is the so-called indexed vector, which is a sequence
-of elements of some type T, whose length _can be reasoned about statically_:
+The classic dependent type is the so-called indexed vector, which is a
+sequence of elements of some type T, whose length _can be reasoned about
+statically_:  Remember that the type argment `n` exists only at compile
+time and you could imagine it's erased at compile-time.  It's not
+runtime state!
 
 ```python
 # Not real Python!
@@ -144,10 +148,12 @@ class Cons(Vector[T, n+1]):
     elem: T
     tail: Vector(T, n)
 
+abc: Vector[str, 3] = Cons("a", Cons("b", Cons("c", Empty())))
+dabc: Vector[str, 4] = Cons("d", abc)
 ```
 
-In our glorious dependently-typed future, we can write all sorts of interesting
-functions that operate on Vectors:
+In our glorious dependently-typed future, we can write all sorts of
+interesting functions that operate on Vectors:
 
 ```python
 
@@ -185,4 +191,214 @@ there's a way to give us a restricted form of dependent types that, say,
 is expressive enough for element_at and concat but not the other two, and
 that's a tradeoff we're okay with.
 
-## Non-solution #3: model-checking
+## Non-solution #3: model-checking/SMT/Z3/???
+
+Who here has heard of a model checker before?
+
+Briefly: you can think of a model checker as a breadth-first exploration
+through the possible executions of a program, in order to check some 
+_property_ of the program, stated in some logical language. 
+
+One possible property of interest might be "At every point in our
+program, it is the case that at no point in the future can we jump to a
+program state where we attempt a division by zero".  If the property is
+not always true, a _counterexample_ would be "here's a sequence of
+execution steps that lead to the division by zero".  (You might be able
+to come up with that series of steps starting with `avg_of([])`)!  We
+call such a counterexample a _refutation_ of the property.
+
+Obviously exhaustively executing the program with all possible values is
+not going to be terribly useful, so we typically abstract away concrete
+program states and explore programs _symbolically_. (That feels a bit
+like abstract interpretation from a few minutes ago!)  The workhorse for
+doing this sort of abstraction are tools called SMT solvers.
+
+I could spend the full hour talking about SMT solvers, they are some of
+my favourite sorts of computer programs.  Instead, let me give you just
+enough intuition for our purposes.
+
+Suppose I have program with two ints, `x` and `y`, in scope:
+
+```
+uint8_t x, y, z;
+...
+z = y-x;
+assert(z == 0);
+```
+
+I haven't told you the values of x and y.  Does this assert ever fire?
+It's _always_ going to be zero, right?  We as humans used a bit of
+logics and knowledge about how the theory of linear arithmetic works in
+order to reach that conclusion, without, hypothetically,
+guess-and-checking some values for x and y or anything.
+
+The way we do this in an SMT solver is to try to "well, actually" it: we
+begin with some symbolic integers (remember, these will never get
+instantiated with concrete values) and say, "hey, solver, I bet you
+can't find values for x and y such that z is not zero by the end."  In
+other words, we're asking it to find a refutation of the postcondition.
+
+
+```
+uint8_t x, y;
+...
+z = x+y;
+assert(x <= z and y <= z);
+```
+
+Will this assert ever fire?  Can you come up with an example?  What if
+I turned this into an unbounded BigInteger?
+
+```
+BigInt x, y;
+...
+z = x+y;
+assert(x <= z and y <= z);
+```
+
+What's more, it's a fact of model checkers that, just like our non-fancy
+type systems, they're sound, push-button in their automation, and can
+scale up to checking real-world software (e.g. kernel device drivers,
+distributed systems).
+
+There's a great property of SMT solvers: the theories they expose are 
+_decidable_, just like a good type system is - in other words, the
+solver will always be able to give a model for a satisfying query, or
+report that an inherently-contradictory one is satisfiable.
+
+Now, here's a downside: suppose I had a precondition and an operation,
+and instead of checking the postcondition I wanted to _invent_ one.
+
+```
+BigInt x, y
+x = 0
+y = x + 3
+assert(/* TODO: a sensible postcondition */);
+```
+
+We could put all sorts of expressions in there: `y == 3`, `y >= 0`, `x
+== 0`, `42 == 42`.  Broadly, we have an SMT analogy to type checking,
+but not a really good one for reconstruction.  That's a thing we'll have
+to think hard about.
+
+Already you might be able to see that this lets us express things that
+depend on program expressions, just like what we wanted dependent types
+to do for us.  Feels promising...?
+
+# Text: the paper proper 
+
+One of the things I love about being a systems person is that it's
+generally fairly easy as a practitioner to pick up, say, the MapReduce
+paper or the Xen hypervisor paper or whatever and get the high order
+bits out of the paper.
+
+PL is a lot more theoretic, so it's a lot harder to grok!  Right off the
+bat it kind of feels like we're in trouble.  The _abstract_ name-drops
+HM, predicate abstraction, dependent types, safety properties,
+refinement=
+
+To be clear, this isn't a criticism of the paper - it's written for an
+academic PL audience and people in those communities would know what
+these things are, but it just means we have to do a bit of the legwork
+to work up to this ourselves.
+
+So, our goal for this section is to actually dig into the paper, and see
+how the best parts of our three non-solutions actually feed into their
+work.  Our first goal is to understand enough to grok the abstract!
+
+## Refinement types are dependent types
+
+Let me introduce a particular kind of dependent type to you: a
+_refinement type_ is the pairing of an ordinary, polymorphic type
+(called the _base type_) with a logical predicate that _refines_ it. {v:
+int | 0 <= v ∧ v < n} refines the base type of the integers to be bound
+between 0 and some other value n. Since n is a program-level term, a
+refinement type is also a dependent type.  In fact, it's `Fin n` from a
+few minutes ago!
+
+Refinement predicates are boolean predicates over program values of
+integer, boolean, and array types.  The paper calls these "logical
+qualifiers". As it happens, those are theories we'd find in a decidable
+SMT solver!
+
+Remember before that our big problem with dependent types: In the limit,
+we placed no restrictions on what sorts of expressions a type could
+depend on.  But, because our logical language in the refinement part is
+decidable, _typechecking is also automatically decidable too_.   And,
+as we'll see soon, we can use an interesting approach called _predicate
+abstraction_ to come up with a way for decidable _type reconstruction_
+too!
+
+In the words of Rondon et al, `type checking [over a constraint domain]
+is shown to be decidable modulo the decidability of the domain`.
+
+It's funny to me looking back that the authors don't make a huge deal
+about using SMT solvers in their type system in this paper.  With the
+benefit of hindsight, it's a really key advancement!
+
+## Divide and Conquer
+
+In terms of a solution strategy, there's something really nice about
+having a refinement type be this tuple of a base type and a predicate.
+We can use a traditional type system to check and reconstruct the
+base type, (In the paper that's "step 1"), and use SMT-based techniques
+to check and reconstruct the constraint that the refinement represents
+("steps 2 and 3").
+
+## Base types: H-M
+
+Who here has heard of the Hindley-Milner type reconstruction algorithm?
+OK, trick question: who here has used it?  Most of your hands should
+be up.  H-M is actually a super-common type reconstruction algorithm;
+ML languages, F#, Haskell, and Rust use it as a basis for their type
+reconstruction, among many others.  Basically, odds are that if you
+program in a language with a static type system rich enough to support
+generics, where you don't have to manually annotate types, AND IT IS NOT
+SCALA, it's likely got H-M in its bones.
+
+In the paper, the only valid base types are int, bool, and `list[int]`.
+Remember, this is a research prototype and not a full-fledged production
+type system, so it's okay if there are some gaping holes in what sorts
+of programs they typecheck, so long as we don't lose soundness.  After
+all, you can flesh out the type system in the inevitable followup works!
+
+H-M is really beautiful because it's so natural.  Here's a program,
+imagine this is in Rust or something:
+
+```
+def f(a, b):
+    if b:
+        return a[0]
+    return a[1] + 1
+```
+What's the type signature of this function? `list[int] -> bool -> int`.
+How did you figure it out?  Well, you looked at the use of the arguments
+to the function, and figured out how their use _constrains_ their types.
+For example, `b` is used as a conditional, `a` is indexed so it has to
+be a `list[?]`, and that `?` is the lhs of an arithmetic expression, so
+`a` has to be a `list[int]`.   
+
+What about this?
+```
+def f(a, b):
+    if b:
+        return a[0]
+    return a[1]
+```
+This function is _underconstrained_: we can't resolve what the type of
+the array is.  But that's ok, that means this is a _polymorphic_
+function!  `list[T] -> bool -> T`!
+
+What about this?
+```
+def f(a, b):
+    if b:
+        return a[0]
+    return a[1] + b
+```
+Hopefully you can see that this produces a type error: it's a
+contradiction that b can be both a bool and a number.
+
+Congratulations, you understand H-M, you're now officially type
+theorists.
+
