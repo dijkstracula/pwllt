@@ -61,6 +61,10 @@ like raises an exception (e.g. AttributeError, IndexError). Of course, in
 Python exceptions aren't exceptional, so this doesn't really apply to "real"
 software, but just for today let's use this rough-and-ready approximation.
 
+By the way, in this talk, generally, I want to give you some intuition
+about PL theory and notation, but I'm going to similarly be a bit fast
+and loose with notation so we don't get too bogged down.  Don't @ me.
+
 # Lists
 
 Here's a super-simple definition of a Lisp-style linked list: we say a list
@@ -88,20 +92,23 @@ TODO
 # Context: three non-solutions
 
 To motivate the paper, I'm going to propose three non-solutions to fixing the
-above program.  The intention here is that we're going to learn something from
-each of the non-solutions that will hopefully guide us to the solution we want
-(spoilers: it's going to be liquid types).
+above program.  The intention here is that we're going to propose
+something that isn't the right solution, but learn something from each
+them, that will hopefully guide us to the solution we want (spoilers:
+it's going to be liquid types).
 
 ## Non-solution 1: A minor fix...
 
 Even though the problem here manifested with a division by zero, the real
 original sin was that we passed the empty list to `avg_of`.  Our goal is to
-statically reject passing None, and we can!  Changing the signature to the
-function specifically consuming a `Cons` will reject `avg_of(None)`.
+statically reject passing Empty, and we can!  Changing the signature to
+the function specifically consuming a `Cons` will reject `avg_of(None)`.
 
-The big observation here is that we took advantage of _inheritance_ to be more
-specific about what sorts of values we should accept here.  That's worth
-remembering.
+The big observation here is that we took advantage of _inheritance_
+(which I'm going to call _subtyping_) to be more specific about what
+sorts of values we should accept here.  Rather than saying "it's
+sufficient for either an Empty or a Cons" we're now sort of saying "it's
+necessary that it's a Cons".
 
 Why is this a non-solution?  This happened to work for our particular case,
 but it's not obvious how we can generalise this to other situations.  
@@ -138,45 +145,46 @@ statically_:  Remember that the type argment `n` exists only at compile
 time and you could imagine it's erased at compile-time.  It's not
 runtime state!
 
-```python
-# Not real Python!
+```java
+/* Not real Java, of course! */
 
-class Vector(Generic[T], n: int): pass
+interface Vector<T, Integer n> { };
 
-class Empty(Vector[T, 0]): pass
-class Cons(Vector[T, n+1]):
-    elem: T
-    tail: Vector(T, n)
+class Empty<T> extends Vector<T, 0> { };
 
-abc: Vector[str, 3] = Cons("a", Cons("b", Cons("c", Empty())))
-dabc: Vector[str, 4] = Cons("d", abc)
+class Cons<T, n+1> extends Vector<T, n+1> {
+    public final T            head;
+    public final Vector<T, n> tail;
+}
+
+Vector<Integer, 2> four_three =
+    new Cons<>(4,
+        new Cons<>(3, 
+            new Empty<>()))
 ```
 
 In our glorious dependently-typed future, we can write all sorts of
 interesting functions that operate on Vectors:
 
-```python
+```java
+/* Again, of course, not real Java! */ 
 
-# Fin is another classic dependent type: it's a natural number that
-# the compiler knows is no bigger than n.  We don't have to return 
-# an Optional value anymore!
-def element_at(l: Vector[T,n+1], i: Fin[n]) -> T:
-    ...
+/* Fin<n> is another classic depedent type: it's a natural number up
+ * to but not exceeding `n`. */
+public static T element_at(Vector<T, n+1> v, i: Fin<n>);
 
-# To concatenate two Vectors, well, hm, the type system needs to know
-# about addition...
-def concat(v1: Vector[T, m], v2: Vector[T, n]) -> Vector[T, m+n]:
-    ...
+/* To concatenate two Vectors, well, hm, the type system needs to know
+ * how to add two integers... Already, this is clearly more powerful than
+ * for example Rust's const generics... */
+public static Vector<T, m+n> concat(v1: Vector<T, m>, v2: Vector<T, n>);
 
-# ...to build up a Vector of all permutations, well, what, now it needs
-# to know about factorial (which is recursively-defined...)
-def all_permutations(v: Vector[T, n]) -> Vector[Vector[T,n], fact(n)]:
-    ...
+/* To build up a Vector of all permutations, we need to know how to reason 
+ * about recursive functions...
+ */
+public static Vector<Vector<T, n>, fact(n)> perms(v: Vector<T, n>);
 
-# ...if the type system can typecheck this function, it has proven
-# the Collantz conjecture!!!
-def three_x_plus_one_until_convergence(n: int) -> Vector[int, collantz(n)]:
-    ...
+/* If this typechecks, we have a proof of the Collantz conjecture! */
+public static Vector<Integer, collantz(n)> iterate_3_x_plus_one(n: int);
 ```
 
 Unfortunately we have a big problem here - if we want arbitrary program
@@ -207,19 +215,33 @@ execution steps that lead to the division by zero".  (You might be able
 to come up with that series of steps starting with `avg_of([])`)!  We
 call such a counterexample a _refutation_ of the property.
 
+Notice something kind of interesting about "BFS through the program"
+idea: you can imagine that every time we hit a branch we explore both
+possibilities: a type system doesn't reall do this, right, like if you
+have an `x if b else y` ternary form, the true branch and the false
+branch must always be the same type.  Because a model checker explores
+both branches explicitly, it's not discarding information it learns
+along one branch but not the other.
+
 Obviously exhaustively executing the program with all possible values is
 not going to be terribly useful, so we typically abstract away concrete
-program states and explore programs _symbolically_. (That feels a bit
-like abstract interpretation from a few minutes ago!)  The workhorse for
+program states and explore programs _symbolically_.  The workhorse for
 doing this sort of abstraction are tools called SMT solvers.
 
 I could spend the full hour talking about SMT solvers, they are some of
 my favourite sorts of computer programs.  Instead, let me give you just
 enough intuition for our purposes.
 
+## Program analysis with SMT
+
+So here I have a repl open here, we're going to write some queries to
+the Z3 SMT solver.  To be clear, Z3 is _not_ a model checker, remember,
+but you could build a model checker (or, a liquid type system!) using Z3
+as a library.
+
 Suppose I have program with two ints, `x` and `y`, in scope:
 
-```
+```c
 uint8_t x, y, z;
 ...
 z = y-x;
@@ -239,7 +261,7 @@ can't find values for x and y such that z is not zero by the end."  In
 other words, we're asking it to find a refutation of the postcondition.
 
 
-```
+```c
 uint8_t x, y;
 ...
 z = x+y;
@@ -249,7 +271,7 @@ assert(x <= z and y <= z);
 Will this assert ever fire?  Can you come up with an example?  What if
 I turned this into an unbounded BigInteger?
 
-```
+```c
 BigInt x, y;
 ...
 z = x+y;
@@ -266,10 +288,25 @@ _decidable_, just like a good type system is - in other words, the
 solver will always be able to give a model for a satisfying query, or
 report that an inherently-contradictory one is satisfiable.
 
-Now, here's a downside: suppose I had a precondition and an operation,
-and instead of checking the postcondition I wanted to _invent_ one.
+## Logical implication
 
-```
+One more thing I want to show: we've seen the ordinary logical operators
+that we're used to from traditional programming: OR, AND, and OR.  SAT
+and SMT solvers also have implications:
+
+Recall how logical implication works: A => B states that it is _sufficient_
+that A holds to know that B also holds.  Stated another way, B holds _whenever_
+A holds.
+
+TODO: I'd like to work this towards a good example of subsumption/subtyping.
+
+## Downsides
+
+Now, here's a downside: suppose I had a precondition and an operation,
+and instead of checking the postcondition I wanted to have one invented
+automatically for me.
+
+```c
 BigInt x, y
 x = 0
 y = x + 3
@@ -278,8 +315,9 @@ assert(/* TODO: a sensible postcondition */);
 
 We could put all sorts of expressions in there: `y == 3`, `y >= 0`, `x
 == 0`, `42 == 42`.  Broadly, we have an SMT analogy to type checking,
-but not a really good one for reconstruction.  That's a thing we'll have
-to think hard about.
+but not a really good one for reconstruction.  We would need to do
+something clever in order to build a tool that could come up with a good
+postcondition for us like this.
 
 Already you might be able to see that this lets us express things that
 depend on program expressions, just like what we wanted dependent types
@@ -304,7 +342,7 @@ to work up to this ourselves.
 
 So, our goal for this section is to actually dig into the paper, and see
 how the best parts of our three non-solutions actually feed into their
-work.  Our first goal is to understand enough to grok the abstract!
+work.
 
 ## Refinement types are dependent types
 
@@ -345,60 +383,415 @@ base type, (In the paper that's "step 1"), and use SMT-based techniques
 to check and reconstruct the constraint that the refinement represents
 ("steps 2 and 3").
 
+# Solvent
+
+Of course the downside of coming from a systems background is that you
+pick up, say again, the MapReduce or Xen paper, but it's extremely
+nontrivial to go off and implement the described system in order to play
+around with the ideas yourself.  It was kind of a revelation to start
+transitioning into a PL person when I started my PhD and to realise
+"hey, with a bit of elbow grease, you can actually teach yourself how
+these things work by rebuilding them!"
+
+So, what I've got here is a tiny liquid types system that a friend of
+mine and I wrote a few years ago.  It handles typechecking most of the
+simple examples in the paper, which was enough for our purposes (please
+do not rely on it for your production system's type safety.)   It also
+has _many_ bugs that I hit while preparing this talk, so hopefully I
+will steer us away from those.
+
+We built it exactly for this reason: we both learn best by doing, so we
+did the thing that would teach ourselves the technique well enough to
+explain it to others!
+
+Sammy totally went ham on this implementation, and he's the reason why
+it's so good.  Thanks, Sammy, if you're tuning in!
+
+## Typechecking, abstractly
+
+So the funny thing about PL papers, coming from the systems world, is
+that in theory everything you need to know in the paper is in two
+figures.  Technically, in this paper, it's four, but one figure is
+pseudocode, so.
+
+## Figure 2: Syntax
+
+There's a joke that all programming languages are is defining syntax and
+defining semantics.  I'm showing Figure 2 not because we have to walk
+through every little detail of the syntax, but to point out that syntax
+really can circumscribe the expressiveness of your technique.
+
+The first part describes what kind of expressions we want to typecheck;
+they're more or less exactly the ones you expect; the actual paper
+typechecks ML rather than, of course, Python, so that means this is
+where we might learn that the typechecker only handles recursion and no
+loops, and, doesn't consider mutable variables.
+
+### Base Types
+
+In particular, I want to draw your attention to "base types": recalling
+the definition of refinement types, figure 2 tells us that their type
+system only allows for base types to be `int` or `bool`.
+
+In the paper, the only valid base types are int and bool. Remember, this
+is a research prototype and not a full-fledged production type system,
+so it's okay if there are some gaping holes in what sorts of programs
+they typecheck, so long as we don't lose soundness.  After all, you can
+flesh out the type system in the inevitable followup works!
+
+### Liquid refinements
+
+They also describe here, precisely, what can appear in the refinement
+section: This is also described recursively: it's either a logical
+qualifier drawn from this Q-star thing, or a conjunction of refinments.
+
+Now by this point in the paper they have formally defined Q-star, but I
+deliberately haven't yet, at least not beyond "well it somehow relates
+to a theory that an SMT solver exposes".  Figures like this are great
+signposts for when you're reading a paper but maybe missed a step:
+being able to notice "hey, what's this piece of syntax I don't know?" is
+super useful when you're piecing a paper together.
+
+## Figure 3: Semantics???
+
+In particular, the precise rules of how liquid types work are encoded in
+the series of greek symbols in Figure 3.  But if you've never looked at
+a typing rule, that figure is going to look like...a lot. Heck, even if
+you have looked at a typing rule, that looks like a lot!
+
+OK, so let me teach you a bit about how to decode the symbols in a PL
+paper.  How might we typecheck the `1 + 2` fragment?
+
+Somebody said something to the effect of "well, addition requires both
+operands to be ints, and the resulting expression types to an int". 
+Here's the typing rule for that:
+
+```
+⊢ p1 : int    ⊢ p2 : int
+------------------------
+     ⊢ p1 + p2 : int
+```
+
+`⊢ p : T` is called a "typing judgement", and can be read out as "the
+program (expression) has type T.  This notion style goes back to Genzler
+and says "if we can prove all the things above the line, we can conclude
+the thing below the line" - it's a fancier way of writing a logical
+implication.
+
+What's cool about this is these typing rules can compose into
+"derivation trees" (show figure 1.5 from P=P).  Some judgement above the
+line might require a proof, so they stack on top of each other like a
+tree.
+
+Some typing rules only make sense in certain contexts.  For instance,
+suppose we wanted to typecheck an anonymous function:
+
+```
+    (Γ(x) = A) ⊢ t : B
+----------------------------
+Γ ⊢ (lambda x: t) : A -> B
+```
+Notice we now have symbols to the left of the turnstyle.  There's this
+new Gamma thing; think of this as the internal state of the typechecker.
+I like to think of Gamma as a dictionary from program variable to type,
+so this says "we can typecheck `lambda x: t` as a function from A to B
+so long as the typechecker can "pull out" some type A when it looks up
+the variable x.
+
+One last thing: here's a typing rule that likely doesn't exist anywhere
+
+```
+------------------------
+     ⊢ p1 + p2 : int
+```
+
+The absence of a rule like this means the type system doesn't permit the
+"addition" of an int and a bool, which is generally a good thing unless
+you're a Perl programmer.  The fact we don't make such nonsense programs
+well-typed is getting closer to what Milner was expressing with his
+"well-typed programs don't go wrong" maxim!
+
+## Typechecking, concretely
+
+OK, enough theory for now.  Let's typecheck some programs.  Our goal is
+to reconstruct a type for the max function.  This is a great first
+example because it's got simple control flow, but no iterative
+computation like loops or recursion.  (That'll come later.)
+
 ## Base types: H-M
 
-Who here has heard of the Hindley-Milner type reconstruction algorithm?
-OK, trick question: who here has used it?  Most of your hands should
-be up.  H-M is actually a super-common type reconstruction algorithm;
-ML languages, F#, Haskell, and Rust use it as a basis for their type
-reconstruction, among many others.  Basically, odds are that if you
-program in a language with a static type system rich enough to support
-generics, where you don't have to manually annotate types, AND IT IS NOT
-SCALA, it's likely got H-M in its bones.
+Who here has used the Hindley-Milner type reconstruction algorithm?
+Trick question!  Most of your hands should be up.  H-M is actually a
+super-common type reconstruction algorithm; ML languages, F#, Haskell,
+and Rust use it as a basis for their type reconstruction, among many
+others.  Basically, odds are that if you program in a language with a
+static type system rich enough to support generics, where you don't have
+to manually annotate types, AND IT IS NOT SCALA, it's likely got H-M in
+its bones.
 
-In the paper, the only valid base types are int, bool, and `list[int]`.
-Remember, this is a research prototype and not a full-fledged production
-type system, so it's okay if there are some gaping holes in what sorts
-of programs they typecheck, so long as we don't lose soundness.  After
-all, you can flesh out the type system in the inevitable followup works!
+H-M is really beautiful because it's so natural.  Here's a program whose 
+type we want to infer.
 
-H-M is really beautiful because it's so natural.  Here's a program,
-imagine this is in Rust or something:
-
+```python
+def max(x, y):
+    if x > y:
+        return x
+    else:
+        return y
 ```
-def f(a, b):
-    if b:
-        return a[0]
-    return a[1] + 1
+What's the type signature of this function? `int -> int -> int`. How
+did you figure it out?  Well, you looked at the use of the arguments to
+the function, and figured out how their use _constrains_ their types.
+
+```python
+def max(x: 'X, y: 'Y) -> 'GUESS # Types with ticks are "constraint"s
+    if x > y:
+        return x
+    else:
+        return y
 ```
-What's the type signature of this function? `list[int] -> bool -> int`.
-How did you figure it out?  Well, you looked at the use of the arguments
-to the function, and figured out how their use _constrains_ their types.
-For example, `b` is used as a conditional, `a` is indexed so it has to
-be a `list[?]`, and that `?` is the lhs of an arithmetic expression, so
-`a` has to be a `list[int]`.   
+We are going to solve for the return type, which I gave a constraint
+variable called `GUESS.  Because our program has `x > y`, we know that
+x and y need to be ints (or, technically, ints or "subtypes" of ints, if
+we had inheritance).  Conversely, Guess needs to be the types of x and
+y, or, a "supertype" thereof, if we had inheritance.  In a world without
+subtyping, everything's an int, so 'GUESS is constrained to be an int.
 
 What about this?
-```
+```python
 def f(a, b):
     if b:
         return a[0]
-    return a[1]
+    else:
+        return a[1]
 ```
 This function is _underconstrained_: we can't resolve what the type of
 the array is.  But that's ok, that means this is a _polymorphic_
 function!  `list[T] -> bool -> T`!
 
 What about this?
-```
+```python
 def f(a, b):
-    if b:
-        return a[0]
-    return a[1] + b
+    if b > a:
+        return b
+    return False
 ```
 Hopefully you can see that this produces a type error: it's a
-contradiction that b can be both a bool and a number.
+contradiction that b can be both a bool and a number.  The reason why is
+that H-M is going to try to constrain `GUESS to be an int and a bool,
+which it can't, because they're not equal, nor would they ever have a
+subtyping relationship.
+
+Hey, this idea of building up constraints and then solving for
+them...does anyone recognise what meta-algorithm this is?  (hint: are
+there are prolog sickos in the audience?)  Yeah, it's unification!  And
+if you are old enough to have taken logic programming in school but not
+so old that you've forgotten the contents of your logic programming in
+school, you might remember that unification is guaranteed to produce the
+_most general unifier_ for its set of constraints.  This means that
+we'll get the most general type assigments; we'll never overfit to the
+data.
 
 Congratulations, you understand H-M, you're now officially type
 theorists.
 
+## From base types to logical qualifiers
+
+For the rest of the talk, we're going to treat reconstructing base types as a
+solved problem, because it really is.  Typechecking and reconstructing the
+logical qualifiers is the novel part.
+
+```python
+def max(a: {int | K1}, b: {int | K2}) -> {int | K3}: 
+    if b > a:
+        return b
+    return a
+
+print(max(42,99))
+```
+
+```python
+def max(a: int, b: int) -> {int | True}: 
+    ...
+print(max(42,99))
+```
+Well, technically correct, but a bit underspecified; this doesn't tell
+us anything more than just running H-M.  So, we'd hope we'd do better.
+
+OK, maybe something like
+
+```python
+def max(a: int, b: int) -> {int | V >= a and V >= b}: 
+    ...
+print(max(42,99))
+```
+That seems pretty reasonable: "the return value is at least as big as
+both."  Or, what about:
+
+```python
+def max(a: int, b: int) -> {int | V == b or V == a}: 
+    ...
+print(max(42,99))
+```
+"The return value is one of the two inputs".  Is this one better or
+worse?  Feels worse, but how can we _quantify_ which might be better?
+
+
+```python
+def max(a: int, b: int) -> {int | V == 99}: 
+    ...
+print(max(42,99))
+```
+Clearly this is the opposite problem of just saying "True" - in this
+world, we observed "well, we call max(), and the return value was 99, so
+the dependent type should encode that fact.  Certainly that's way too
+overspecified!
+
+## Two kinds of refinement constraints
+
+Just like with H-M, our goal is going to be to come up with some
+constraints to solve.  But instead of saying "are these two base types
+equal (or inherit from some common superclass)", we're going to ask "are
+these two logical qualifiers compatable", for some definition of
+"logically compatable".
+
+Remember that we have the wildcard that we can substitute program values
+in.  Suppose we're typing the body
+
+```python
+def max(x: {int | K1}, x: {int | K2}) -> {int | K3}: 
+    if x > y: # <- suppose we are typechecking here...
+        return x
+    else:
+        return y
+```
+
+We're going to want to come up with logical qualifiers for each of these
+variables.  We're going to do this in two ways:
+
+* Scope constraints: how could the logical qualifier depend on existing
+  values in scope?
+* Flow constraints: how could the logical qualifier depend on a
+  particular control flow path through the program?
+
+### Scope constraints
+
+Scope constraints are probably the easiest to understand so let's talk
+about those first.  
+
+K1 and K2 have no scope constraints because they're "at the top of the
+program".  So, their typing contexts are empty.  By contrast, what's in
+scope when we compute K3?  Well, x and y are, so the refinement type can
+depend on values of x and y!
+
+```
+Γ ⊢ K1
+Γ ⊢ K2
+Γ(x) = {int | K1} ; Γ(y) = {int | K2} Γ ⊢ K3
+```
+
+### Flow constraints
+
+The paper doesn't explicitly call these "flow constraints" but
+subsequent work does, and I like the terminology.
+
+Suppose in some actual execution, x > y, so we return x.
+```python
+def max(x: {int | K1}, x: {int | K2}) -> {int | K3}: 
+    if x > y: 
+        return x # <- What is K3 in this case?
+    else:
+        return y
+```
+
+In this case, our typing context doesn't just involve values in scope
+but facts related to control flow through the program.  So, it'll look
+like this:
+
+```
+Γ ⊢ K1
+Γ ⊢ K2
+Γ(x) = {int | K1} ; Γ(y) = {int | K2} ; (x > y) Γ ⊢ K3
+```
+
+If you're a type theorist you might start itching, because we have
+program values in our typing context.  That, generally, doesn't make
+sense.  But, remember, we're implementing a _dependent type system_
+here, so terms and types can in fact intermingle in the context!
+
+OK, so what's the type for the return value in this path?  A reasonable
+thing to say is `{int | x == v} = K3`.  That is, the type of the return
+value is exactly x.  But, some of you probably can see that this will
+contradict the other flow when take the false branch.  So, we don't want
+to say that K3 is _equal_, but rather this branch's type is a _subtype_
+of the final type: `{int | x == v} <: K3`!
+
+By symmetry, we'll have:
+
+```
+Γ ⊢ K1
+Γ ⊢ K2
+Γ(x) = {int | K1} ; Γ(y) = {int | K2} ; (x > y)  Γ ⊢ {int | x == v } <: K3
+Γ(x) = {int | K1} ; Γ(y) = {int | K2} ; ~(x > y) Γ ⊢ {int | y == v } <: K3
+```
+
+Because the final type is going to be one of these two types, we could choose to
+say "well, why not take the logical-OR of them?"  That means our type signature
+would end up being
+
+```python
+def max(a: int, b: int) -> {int | V == b or V == a}: 
+    ...
+```
+
+Remember that we concluded that this typing was "fine", but not the S-tier
+solution.  We want a better way to come up with the right subtype.
+
+### What's in a subtype?
+
+How should we generalize our inferred type instead?
+
+Remember an informal definition of subtyping, courtesy of Liskov: "if A is a
+subtype of B, then it's _sufficent_ to have an A in a situation where we need a
+B".  Hey, that's equivalent to our definition for logical implication!  
+
+```
+ (x > y), {int | x == v } <: K3
+~(x > y), {int | y == v } <: K3
+
+ (x > y) /\ x == v ==> (our final refinement type)
+~(x > y) /\ x == v ==> (our final refinement type)
+```
+
+So, if we had manually annotated the return type of this function, typechecking
+the logical qualifier would simply boil down to asking Z3 "does this logical
+implication hold?"!!! 
+
+## Predefined qualifiers
+
+So this whole time I've been saying "coming up with the right refinement
+qualifier is hard" 
+
+- now it's time to tell you how the authors did it. The
+thrilling conclusion: they did it in advance!
+
+A liquid type system contains a predefined set of qualifiers from the
+SMT solver's theory that's used as a sort of "basis set" that will
+comprise a reconstructed liquid type:
+
+```python
+quals = [0 < V, 
+         _ <= V, 
+         V < _,
+         len(_) <= V]
+```
+Here's the built-in qualifiers from the paper.  The underbar is the *
+operator from the paper; the idea is that it can be replaced with any
+variable in scope whose base type is appropriate (e.g. can't place a
+boolean on the LHS of <=).
+
+You're probably thinking "well, doesn't this really limit the
+expressivity of the refinement types?", and, yes, indeed it does, but
+that's kind of the point!  The idea is that so long as you have a
+representitve, but still finite, set of qualifiers, the type system has
+a finite amount of work to do during typechecking.

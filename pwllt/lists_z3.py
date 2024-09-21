@@ -17,9 +17,8 @@ s = z3.Solver()
 
 b1, b2, b3 = z3.Bools("b1 b2 b3")
 
-s.add(z3.Or(z3.And(b1, b2), 
-            z3.Not(b3)))
-s.check()
+z3.solve(z3.Or(z3.And(b1, b2), 
+               z3.Not(b3)))
 
 #print(s.model())
 # }}}
