@@ -26,7 +26,7 @@ z3.solve(z3.Or(z3.And(b1, b2),
 # {{{
 s = z3.Solver()
 
-x,y,z = z3.BitVecs("x y z", 8)
+x,y,z = z3.BitVecs("x y z", 32)
 
 s.add(x == y)         # Precondition assumption
 z = y-x               # operation
@@ -38,17 +38,39 @@ except:
     print("As expected, we failed to find a bug!")
 # }}}
 
+# Bsearch
+
 # {{{
 s = z3.Solver()
-x,y,z = z3.BitVecs("x y z", 8)
-#x,y,z = z3.Ints("x y z")
+lo, mid, hi = z3.BitVecs("lo, mid, hi", 32)
+s.add(0 <= lo, 0 <= hi)
 
-z = x + y
-s.add(z3.Not(z3.And(z >= x, z >= y)))
+s.add(lo <= hi)         # Loop invariant
+mid = (lo + hi) / 2
+s.add(z3.Not(z3.And(lo <= mid, mid <= hi)))
 
 s.check()
 print(s.model()) # If there's a model, we found a bug!
+
+# How doe we fix this?
+
+s = z3.Solver()
+lo, mid, hi = z3.BitVecs("lo, mid, hi", 32)
+s.add(0 <= lo, 0 <= hi)
+
+s.add(lo <= hi)         # Precondition assumption
+mid = lo + ((hi - lo) / 2)
+s.add(z3.Not(z3.And(lo <= mid, mid <= hi)))
+
+try:
+    s.check()
+    print(s.model()) # If there's a model, we found a bug!
+except Exception:
+    print("As expected, no error!")
+
 # }}}
+
+
 
 # {{{
 s = z3.Solver()
