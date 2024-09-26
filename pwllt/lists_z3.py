@@ -13,12 +13,9 @@ for b1, b2, b3 in itertools.product([False, True], repeat=3):
 # {{{
 import z3
 
-s = z3.Solver()
-
 b1, b2, b3 = z3.Bools("b1 b2 b3")
-
-z3.solve(z3.Or(z3.And(b1, b2), 
-               z3.Not(b3)))
+fmla = z3.And(z3.Or(b1, b2), z3.Not(b3))
+z3.solve(fmla)
 
 #print(s.model())
 # }}}
@@ -28,13 +25,13 @@ s = z3.Solver()
 
 x,y,z = z3.BitVecs("x y z", 32)
 
-s.add(x == y)         # Precondition assumption
-z = y-x               # operation
-s.add(z3.Not(z == 0)) # Postcondition assertion
+s.add(y == x)          # Precondition assumption
+z = y-x                # operation
+s.add(z3.Not(z == 0))  # Is there a world where z != 0?
 try:
     s.check()
     print(s.model()) # If there's a model, we found a bug!
-except:
+except Exception as e:
     print("As expected, we failed to find a bug!")
 # }}}
 
@@ -46,11 +43,13 @@ lo, mid, hi = z3.BitVecs("lo, mid, hi", 32)
 s.add(0 <= lo, 0 <= hi)
 
 s.add(lo <= hi)         # Loop invariant
-mid = (lo + hi) / 2
+mid = (lo + hi) / 2     # Operation
 s.add(z3.Not(z3.And(lo <= mid, mid <= hi)))
 
 s.check()
 print(s.model()) # If there's a model, we found a bug!
+
+{ int | 0 <= V and V <= n }
 
 # How doe we fix this?
 
